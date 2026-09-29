@@ -1,0 +1,1595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- On phones: no pinch-zooming the page, and use the whole screen (even around a notch) -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Voxel Sandbox</title>
+<!-- What link previews (WhatsApp, iMessage, social media) show when someone shares the game's address -->
+<meta name="description" content="Explore an endless blocky world and build whatever you like. Plays in your browser on phones and computers.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Voxel Sandbox">
+<meta property="og:description" content="Explore an endless blocky world and build whatever you like. Tap to play, nothing to install.">
+<meta property="og:url" content="https://cjextreem.github.io/voxel-sandbox/">
+<meta property="og:image" content="https://cjextreem.github.io/voxel-sandbox/preview.png">
+<meta property="og:image:width" content="600">
+<meta property="og:image:height" content="315">
+<meta property="og:image:alt" content="Voxel Sandbox: blocky green hills, two trees and a square pixel sun">
+<meta name="theme-color" content="#8ec9f0">
+<style>
+  /* ---------- Page ---------- */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #8ec9f0;
+    color: #fff;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    user-select: none;
+    /* Keep the browser's own touch gestures (scrolling, pull to refresh, zooming, long-press menus)
+       from getting in the way of the game */
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+  canvas { display: block; }
+
+  /* ---------- Crosshair: a plus sign that inverts whatever is behind it, so it's always visible ---------- */
+  #crosshair {
+    position: fixed; left: 50%; top: 50%;
+    width: 22px; height: 22px;
+    transform: translate(-50%, -50%);
+    mix-blend-mode: difference;
+    pointer-events: none;
+  }
+  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; }
+  #crosshair::before { left: 10px; top: 0; width: 2px; height: 22px; }
+  #crosshair::after  { left: 0; top: 10px; width: 22px; height: 2px; }
+
+  /* ---------- Hotbar ---------- */
+  #hotbar {
+    position: fixed; left: 50%; bottom: 14px;
+    transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 4px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 2px solid rgba(0, 0, 0, 0.55);
+    border-radius: 6px;
+    pointer-events: none;
+  }
+  .slot {
+    position: relative;
+    width: 54px; height: 54px;
+    display: grid; place-items: center;
+    border: 3px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+  }
+  .slot.selected { border-color: #fff; background: rgba(255, 255, 255, 0.18); }
+  .slot canvas { width: 38px; height: 38px; image-rendering: pixelated; }
+  .slot span {
+    position: absolute; top: 2px; left: 5px;
+    font: 700 11px/1 ui-monospace, Menlo, monospace;
+    text-shadow: 1px 1px 0 #000;
+  }
+
+  /* Short message above the hotbar (the chosen block, "Sound off", ...); fades in briefly */
+  #message {
+    position: fixed; left: 50%; bottom: 86px;
+    transform: translateX(-50%);
+    font-size: 15px; font-weight: 700;
+    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.7);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #message.visible { opacity: 1; }
+
+  /* ---------- Start / pause screen ---------- */
+  #overlay {
+    position: fixed; inset: 0;
+    display: flex;
+    padding: 16px;
+    overflow-y: auto;    /* if the panel doesn't fit (a phone held sideways), let it scroll */
+    touch-action: pan-y;
+    background: rgba(12, 22, 40, 0.5);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+    cursor: pointer;
+  }
+  #overlay.hidden { display: none; }
+  .panel {
+    width: min(440px, 100%);
+    margin: auto; /* centred, but still scrollable when taller than the screen */
+    padding: 28px 32px 22px;
+    background: rgba(24, 28, 36, 0.9);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    text-align: center;
+  }
+  .panel h1 { font-size: 34px; letter-spacing: 0.5px; text-shadow: 3px 3px 0 #3b7a24; }
+  .tagline { margin-top: 6px; font-size: 14px; color: #b9c3d0; }
+  .controls {
+    list-style: none;
+    display: grid; gap: 9px;
+    margin: 22px 0;
+    font-size: 14px;
+    text-align: left;
+  }
+  .controls li { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .controls li > span:last-child { text-align: right; }
+  kbd {
+    display: inline-block;
+    min-width: 26px; margin-left: 4px; padding: 4px 7px;
+    font: 600 12px/1 ui-monospace, Menlo, monospace;
+    color: #1d2129; background: #eef1f5;
+    border-radius: 5px;
+    box-shadow: 0 2px 0 #9aa3ae;
+    text-align: center;
+  }
+  #play-button {
+    display: inline-block;
+    padding: 12px 28px;
+    font-size: 16px; font-weight: 700;
+    background: #4f9d2d;
+    border-radius: 8px;
+    box-shadow: 0 4px 0 #2f6419;
+  }
+  #overlay:hover #play-button { background: #5cb036; }
+  .hint { margin-top: 14px; font-size: 13px; line-height: 1.4; color: #f3c969; }
+  .seed { margin-top: 14px; font-size: 12px; color: #8792a0; }
+  .rotate-hint { margin-top: 12px; font-size: 13px; color: #b9c3d0; }
+
+  /* Computers and touch screens each get their own list of controls */
+  body.touch .desktop-only, body:not(.touch) .touch-only { display: none; }
+  .controls.touch-only li > span:last-child { color: #b9c3d0; }
+  @media (orientation: landscape) { .rotate-hint { display: none; } }
+
+  /* Short screens, like a phone held sideways: squeeze the start screen */
+  @media (max-height: 520px) {
+    .panel { padding: 16px 22px 14px; }
+    .panel h1 { font-size: 24px; }
+    .tagline { display: none; }
+    .controls { margin: 12px 0; gap: 6px; font-size: 13px; }
+    #play-button { padding: 10px 24px; }
+  }
+
+  /* ---------- Touch controls (phones and tablets only) ---------- */
+  #touch-ui { display: none; }
+  body.touch #touch-ui { display: block; }
+  body.touch #hotbar { pointer-events: auto; } /* tap a slot to choose it */
+
+  .touch-button {
+    position: fixed;
+    display: grid; place-items: center;
+    width: 64px; height: 64px;
+    padding: 0;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+    touch-action: none;
+  }
+  .touch-button.pressed { background: rgba(255, 255, 255, 0.35); }
+  .touch-button svg { width: 50%; height: 50%; fill: currentColor; }
+  .touch-button canvas { width: 34px; height: 34px; image-rendering: pixelated; }
+
+  /* Action buttons around the bottom-right corner (env() keeps controls clear of an iPhone's notch
+     and home bar) */
+  #jump-button  { right: calc(22px + env(safe-area-inset-right));  bottom: calc(26px + env(safe-area-inset-bottom));  width: 78px; height: 78px; }
+  #break-button { right: calc(112px + env(safe-area-inset-right)); bottom: calc(30px + env(safe-area-inset-bottom)); }
+  #place-button { right: calc(30px + env(safe-area-inset-right));  bottom: calc(116px + env(safe-area-inset-bottom)); }
+
+  #corner-buttons {
+    position: fixed; top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right));
+    display: flex; gap: 8px;
+  }
+  #corner-buttons .touch-button { position: static; width: 44px; height: 44px; border-radius: 12px; }
+  #mute-button .sound-off, #mute-button.muted .sound-on { display: none; }
+  #mute-button.muted .sound-off { display: inline; }
+
+  /* Thumb stick: rests bottom-left, and jumps to wherever your thumb lands on the left half */
+  #joystick {
+    position: fixed; left: calc(88px + env(safe-area-inset-left)); top: calc(100% - 88px - env(safe-area-inset-bottom));
+    width: 112px; height: 112px; margin: -56px 0 0 -56px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.2);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  #joystick.active { opacity: 1; }
+  #joystick-knob {
+    position: absolute; left: 50%; top: 50%;
+    width: 50px; height: 50px; margin: -25px 0 0 -25px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.6);
+  }
+
+  /* Phone held upright: move the hotbar to the top, out of the thumbs' way */
+  @media (orientation: portrait) {
+    body.touch #hotbar { top: calc(64px + env(safe-area-inset-top)); bottom: auto; }
+    body.touch #message { top: calc(140px + env(safe-area-inset-top)); bottom: auto; }
+  }
+  /* Phone held sideways: keep the hotbar above the home bar */
+  @media (orientation: landscape) {
+    body.touch #hotbar { bottom: calc(14px + env(safe-area-inset-bottom)); }
+  }
+</style>
+</head>
+<body>
+  <!-- In-game HUD -->
+  <div id="crosshair"></div>
+  <div id="message"></div>
+  <div id="hotbar"></div>
+
+  <!-- On-screen controls for phones and tablets (hidden on computers) -->
+  <div id="touch-ui">
+    <div id="joystick"><div id="joystick-knob"></div></div>
+    <button class="touch-button" id="jump-button" aria-label="Jump">
+      <svg viewBox="0 0 24 24"><path d="M12 3l8.5 9.5H15V21H9v-8.5H3.5z"/></svg>
+    </button>
+    <button class="touch-button" id="break-button" aria-label="Break block">
+      <svg viewBox="0 0 24 24"><g transform="rotate(45 12 12)">
+        <path d="M2 9Q12 0 22 9Q12 5 2 9z"/><rect x="10.8" y="5" width="2.4" height="17" rx="1.2"/>
+      </g></svg>
+    </button>
+    <button class="touch-button" id="place-button" aria-label="Place block"></button> <!-- shows the chosen block -->
+    <div id="corner-buttons">
+      <button class="touch-button" id="time-button" aria-label="Speed up time (hold)">
+        <svg viewBox="0 0 24 24"><path d="M3 6l8 6-8 6zM12 6l8 6-8 6z"/></svg>
+      </button>
+      <button class="touch-button" id="mute-button" aria-label="Sound on or off">
+        <svg viewBox="0 0 24 24">
+          <path d="M4 9h4l5-4v14l-5-4H4z"/>
+          <g class="sound-on" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M16 9a4.5 4.5 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/>
+          </g>
+          <g class="sound-off" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M16 9l5 6M21 9l-5 6"/>
+          </g>
+        </svg>
+      </button>
+      <button class="touch-button" id="pause-button" aria-label="Pause">
+        <svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Start / pause screen. Clicking (or tapping) anywhere on it starts the game. -->
+  <div id="overlay">
+    <div class="panel">
+      <h1>Voxel Sandbox</h1>
+      <p class="tagline">Explore an endless world and build whatever you like.</p>
+      <ul class="controls touch-only">
+        <li><span>Move</span>                <span>thumb stick on the left</span></li>
+        <li><span>Look around</span>         <span>drag on the right</span></li>
+        <li><span>Jump, break, place</span>  <span>buttons, bottom right</span></li>
+        <li><span>Choose block</span>        <span>tap the hotbar</span></li>
+        <li><span>Pause, sound, fast time</span> <span>buttons, top right</span></li>
+      </ul>
+      <ul class="controls desktop-only">
+        <li><span>Move</span>          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span></li>
+        <li><span>Look around</span>   <span><kbd>Mouse</kbd></span></li>
+        <li><span>Jump</span>          <span><kbd>Space</kbd></span></li>
+        <li><span>Break block</span>   <span><kbd>Left click</kbd></span></li>
+        <li><span>Place block</span>   <span><kbd>Right click</kbd></span></li>
+        <li><span>Choose block</span>  <span><kbd>1–5</kbd> or <kbd>Scroll</kbd></span></li>
+        <li><span>Speed up time</span> <span>hold <kbd>T</kbd></span></li>
+        <li><span>Mute sound</span>    <span><kbd>M</kbd></span></li>
+        <li><span>Release mouse</span> <span><kbd>Esc</kbd></span></li>
+      </ul>
+      <div id="play-button">Loading…</div>
+      <p class="rotate-hint touch-only">Tip: turn your device sideways for a wider view.</p>
+      <p class="hint" id="lock-hint" hidden>
+        Couldn't capture the mouse. Wait a second and click again. If it still won't start,
+        open this page in Chrome, Firefox or Safari.
+      </p>
+      <p class="seed" id="seed"></p>
+    </div>
+  </div>
+
+  <!-- If Three.js can't be downloaded (e.g. you're offline), say so instead of showing "Loading…" forever -->
+  <script>
+    setTimeout(() => {
+      if (!window.gameReady) {
+        document.getElementById('play-button').textContent = 'Could not load Three.js. Are you online?';
+      }
+    }, 10000);
+  </script>
+
+  <script type="module">
+    // Three.js comes straight from a CDN, so there is nothing to install or build. Importing it by its
+    // full address (rather than through an import map) also works on older phones.
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+    // =========================================================================
+    //  SETTINGS
+    // =========================================================================
+
+    // Phones and tablets get on-screen controls. Most say up front that a finger is their main pointer
+    // (a "coarse" one); on anything else the controls switch on when a finger taps the start screen.
+    let touchMode = matchMedia('(pointer: coarse)').matches;
+
+    const CHUNK_SIZE = 16;        // the endless world is split into 16 × 16 columns of blocks ("chunks")
+    const WORLD_HEIGHT = 48;      // blocks can exist from y = 0 up to y = 47
+    const RENDER_DISTANCE = touchMode ? 5 : 6; // how many chunks away the world is drawn (a bit less on phones, to keep them smooth)
+    const CHUNKS_PER_FRAME = 2;   // new chunk meshes built per frame; spreading the work out keeps walking smooth
+    const REACH = 5;              // how far away (in blocks) you can break and place
+
+    const PLAYER_WIDTH = 0.6;     // the player is a 0.6 × 1.8 × 0.6 box...
+    const PLAYER_HEIGHT = 1.8;
+    const EYE_HEIGHT = 1.6;       // ...with the camera near the top
+    const WALK_SPEED = 4.5;       // blocks per second
+    const JUMP_SPEED = 9;         // upward speed at the start of a jump (enough to clear one block)
+    const GRAVITY = 30;           // blocks per second²
+    const MAX_FALL_SPEED = 40;
+    const MOUSE_SENSITIVITY = 0.0022;
+    const TOUCH_LOOK_SENSITIVITY = 0.005; // how far the view turns per pixel a finger drags
+    const JOYSTICK_RADIUS = 56;           // how far (in pixels) the on-screen stick's knob can move
+
+    const MASTER_VOLUME = 0.6;    // overall loudness of all sound effects (0 … 1)
+    const STEP_LENGTH = 1.8;      // blocks walked between footstep sounds
+
+    const DAY_LENGTH = 360;       // seconds for one full day and night
+    const TIME_SKIP_SPEED = 30;   // hold T to make time pass 30× faster
+    const START_TIME = 0.3;       // time of day at the start (0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset)
+
+    // Add ?seed=12345 to the URL to get the same world every time
+    const SEED = Number(new URLSearchParams(location.search).get('seed')) || Math.floor(Math.random() * 1e9);
+
+    // =========================================================================
+    //  RANDOM NUMBERS & NOISE
+    // =========================================================================
+
+    // Seeded random number generator (mulberry32): the same seed always gives the same numbers in [0, 1)
+    function createRandom(seed) {
+      let state = seed | 0;
+      return function random() {
+        state = (state + 0x6d2b79f5) | 0;
+        let t = Math.imul(state ^ (state >>> 15), state | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    // 2D Perlin noise: returns smooth values in roughly [-1, 1], where nearby points get similar values.
+    // That smoothness is what turns random numbers into rolling hills.
+    function createNoise2D(random) {
+      // A shuffled table that picks a pseudo-random gradient direction for every grid corner
+      const shuffled = Array.from({ length: 256 }, (_, i) => i);
+      for (let i = 255; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      const perm = new Uint8Array(512);
+      for (let i = 0; i < 512; i++) perm[i] = shuffled[i & 255];
+
+      const GRADIENTS = [[1, 1], [-1, 1], [1, -1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1]];
+      const fade = t => t * t * t * (t * (t * 6 - 15) + 10); // S-curve, so there are no visible creases
+      const lerp = (a, b, t) => a + (b - a) * t;
+
+      return function noise(x, y) {
+        const x0 = Math.floor(x), y0 = Math.floor(y);
+        const fx = x - x0, fy = y - y0;
+        const xi = x0 & 255, yi = y0 & 255;
+        // Dot product of a corner's gradient with the vector from that corner to (x, y)
+        const corner = (cx, cy) => {
+          const [gx, gy] = GRADIENTS[perm[perm[xi + cx] + yi + cy] & 7];
+          return gx * (fx - cx) + gy * (fy - cy);
+        };
+        const u = fade(fx), v = fade(fy);
+        return lerp(lerp(corner(0, 0), corner(1, 0), u),
+                    lerp(corner(0, 1), corner(1, 1), u), v);
+      };
+    }
+
+    // =========================================================================
+    //  BLOCK TYPES & PROCEDURAL TEXTURES
+    // =========================================================================
+
+    const BLOCK = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, WOOD: 4, LEAVES: 5, BEDROCK: 6 };
+
+    // Every texture is painted into one small image (a texture "atlas"): 16×16 pixel tiles in a row
+    const TILE_PX = 16;
+    const TILE = { GRASS_TOP: 0, GRASS_SIDE: 1, DIRT: 2, STONE: 3, LOG_SIDE: 4, LOG_TOP: 5, LEAVES: 6, BEDROCK: 7 };
+    const TILE_COUNT = Object.keys(TILE).length;
+
+    // Display name, which tile each block shows on its top, sides and bottom, and what it sounds like
+    // (one of the materials in MATERIAL_SOUNDS, in the SOUND EFFECTS section)
+    const BLOCK_INFO = {
+      [BLOCK.GRASS]:   { name: 'Grass',   top: TILE.GRASS_TOP, side: TILE.GRASS_SIDE, bottom: TILE.DIRT,    sound: 'grass' },
+      [BLOCK.DIRT]:    { name: 'Dirt',    top: TILE.DIRT,      side: TILE.DIRT,       bottom: TILE.DIRT,    sound: 'dirt' },
+      [BLOCK.STONE]:   { name: 'Stone',   top: TILE.STONE,     side: TILE.STONE,      bottom: TILE.STONE,   sound: 'stone' },
+      [BLOCK.WOOD]:    { name: 'Wood',    top: TILE.LOG_TOP,   side: TILE.LOG_SIDE,   bottom: TILE.LOG_TOP, sound: 'wood' },
+      [BLOCK.LEAVES]:  { name: 'Leaves',  top: TILE.LEAVES,    side: TILE.LEAVES,     bottom: TILE.LEAVES,  sound: 'leaves' },
+      [BLOCK.BEDROCK]: { name: 'Bedrock', top: TILE.BEDROCK,   side: TILE.BEDROCK,    bottom: TILE.BEDROCK, sound: 'stone' },
+    };
+
+    // The blocks you can place, in hotbar order (keys 1–5)
+    const HOTBAR = [BLOCK.GRASS, BLOCK.DIRT, BLOCK.STONE, BLOCK.WOOD, BLOCK.LEAVES];
+
+    // Paint every tile pixel by pixel onto a canvas. No image files needed.
+    function createAtlasCanvas() {
+      const canvas = document.createElement('canvas');
+      canvas.width = TILE_PX * TILE_COUNT;
+      canvas.height = TILE_PX;
+      const ctx = canvas.getContext('2d');
+      const image = ctx.createImageData(canvas.width, canvas.height);
+      const random = createRandom(2024); // fixed seed, so the textures look the same every time
+
+      const shade = ([r, g, b], f) => [r * f, g * f, b * f];     // scale a colour's brightness
+      const vary = amount => 1 + (random() * 2 - 1) * amount;   // random factor in [1 - amount, 1 + amount]
+
+      // Fill one tile; colorAt(x, y) returns [r, g, b] for each pixel (y = 0 is the top row)
+      function paint(tile, colorAt) {
+        for (let y = 0; y < TILE_PX; y++) {
+          for (let x = 0; x < TILE_PX; x++) {
+            const [r, g, b] = colorAt(x, y);
+            image.data.set([r, g, b, 255], (y * canvas.width + tile * TILE_PX + x) * 4);
+          }
+        }
+      }
+
+      const GRASS = [104, 170, 62], DIRT = [134, 96, 67], STONE = [128, 128, 128];
+      const BARK = [102, 77, 47], WOOD_RINGS = [184, 148, 94], LEAF = [62, 130, 44];
+
+      const grassPixel = () => shade(GRASS, vary(0.1) * (random() < 0.15 ? 0.82 : 1));
+      const dirtPixel = () => random() < 0.07
+        ? shade([112, 104, 96], vary(0.12))   // the odd pebble
+        : shade(DIRT, vary(0.14));
+
+      paint(TILE.GRASS_TOP, grassPixel);
+      paint(TILE.DIRT, dirtPixel);
+
+      // Grass side: dirt with a ragged strip of grass hanging over the top edge
+      const fringe = Array.from({ length: TILE_PX }, () => 2 + Math.floor(random() * 4));
+      paint(TILE.GRASS_SIDE, (x, y) => (y < fringe[x] ? grassPixel() : dirtPixel()));
+
+      paint(TILE.STONE, () => {
+        const r = random();
+        return shade(STONE, r < 0.12 ? 0.8 : r > 0.9 ? 1.12 : vary(0.05));
+      });
+
+      // Log side: bark with vertical grain (each column of pixels gets its own shade)
+      const grain = Array.from({ length: TILE_PX }, (_, x) => (x % 4 === 1 ? 0.78 : vary(0.08)));
+      paint(TILE.LOG_SIDE, x => shade(BARK, grain[x] * vary(0.05)));
+
+      // Log top: square growth rings inside a ring of bark
+      paint(TILE.LOG_TOP, (x, y) => {
+        const ring = Math.floor(Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5))); // 0 (centre) … 7 (edge)
+        if (ring === 7) return shade(BARK, vary(0.08));
+        return shade(WOOD_RINGS, (ring % 2 ? 0.86 : 1) * vary(0.04));
+      });
+
+      paint(TILE.LEAVES, () => {
+        const r = random();
+        return shade(LEAF, r < 0.22 ? 0.6 : r > 0.9 ? 1.2 : vary(0.1));
+      });
+
+      paint(TILE.BEDROCK, () => shade([86, 86, 86], [0.45, 0.75, 1.1][Math.floor(random() * 3)]));
+
+      ctx.putImageData(image, 0, 0);
+      return canvas;
+    }
+
+    // Draw a little 3D-looking cube for the hotbar, using the block's own textures
+    function createBlockIcon(atlas, type) {
+      const SIZE = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = SIZE;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+
+      const k = SIZE / 2 / TILE_PX; // texture pixels → icon pixels
+      const { top, side } = BLOCK_INFO[type];
+      // [tile, 2D transform that maps a 16×16 tile onto that face, how much to darken it]
+      const faces = [
+        [top,  [k, -k / 2, k, k / 2, 0, SIZE / 4],        0],    // top
+        [side, [k,  k / 2, 0, k,     0, SIZE / 4],        0.2],  // front left
+        [side, [k, -k / 2, 0, k,     SIZE / 2, SIZE / 2], 0.4],  // front right
+      ];
+      for (const [tile, transform, darkness] of faces) {
+        ctx.setTransform(...transform);
+        ctx.drawImage(atlas, tile * TILE_PX, 0, TILE_PX, TILE_PX, 0, 0, TILE_PX, TILE_PX);
+        ctx.fillStyle = `rgba(0, 0, 0, ${darkness})`;
+        ctx.fillRect(0, 0, TILE_PX, TILE_PX);
+      }
+      return canvas;
+    }
+
+    // =========================================================================
+    //  WORLD DATA: an endless grid of chunks, created as the player explores
+    // =========================================================================
+
+    // Each chunk keeps its blocks in a flat array with one byte (a BLOCK id) per block.
+    // Only the chunks near the player exist (see CHUNK LOADING below).
+    const chunks = new Map(); // "cx,cz" → { cx, cz, blocks, mesh, edited }
+
+    const chunkKey = (cx, cz) => `${cx},${cz}`;
+    const blockIndex = (lx, y, lz) => (y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx; // lx, lz: position inside a chunk
+
+    function getChunk(cx, cz) {
+      return chunks.get(chunkKey(cx, cz));
+    }
+
+    // Block at world position (x, y, z): air if that chunk hasn't been generated.
+    // Math.floor (rather than dividing and truncating) keeps negative coordinates in the right chunk.
+    function getBlock(x, y, z) {
+      if (y < 0 || y >= WORLD_HEIGHT) return BLOCK.AIR;
+      const cx = Math.floor(x / CHUNK_SIZE), cz = Math.floor(z / CHUNK_SIZE);
+      const chunk = getChunk(cx, cz);
+      return chunk ? chunk.blocks[blockIndex(x - cx * CHUNK_SIZE, y, z - cz * CHUNK_SIZE)] : BLOCK.AIR;
+    }
+
+    // Change one block (the player breaking or placing one) and schedule the affected meshes for a rebuild
+    function setBlock(x, y, z, type) {
+      const cx = Math.floor(x / CHUNK_SIZE), cz = Math.floor(z / CHUNK_SIZE);
+      const chunk = getChunk(cx, cz);
+      if (!chunk || y < 0 || y >= WORLD_HEIGHT) return;
+      chunk.blocks[blockIndex(x - cx * CHUNK_SIZE, y, z - cz * CHUNK_SIZE)] = type;
+      chunk.edited = true; // edited chunks are never thrown away, so your builds survive walking off
+      markChunksDirty(x, z);
+    }
+
+    // =========================================================================
+    //  WORLD GENERATION: each chunk is made from the seed and its own position
+    //  alone, so a place always looks the same, whatever order chunks load in
+    // =========================================================================
+
+    const noise = createNoise2D(createRandom(SEED));
+    const TREE_CELL = 8; // the ground is divided into 8 × 8 cells that hold at most one tree each
+
+    // Height of the grass at (x, z)
+    function terrainHeight(x, z) {
+      // Very slow noise decides how hilly each region is, from gentle plains to steep hills...
+      const hilliness = 0.5 + 0.5 * noise(x / 200 + 1000, z / 200 + 1000);
+      // ...and a few layers of faster noise make the hills themselves
+      const n = 0.7 * noise(x / 32, z / 32) + 0.25 * noise(x / 14, z / 14) + 0.05 * noise(x / 6, z / 6);
+      return Math.max(3, Math.min(WORLD_HEIGHT - 12, Math.round(14 + n * (6 + 18 * hilliness))));
+    }
+
+    function generateChunk(cx, cz) {
+      const blocks = new Uint8Array(CHUNK_SIZE * WORLD_HEIGHT * CHUNK_SIZE);
+      const x0 = cx * CHUNK_SIZE, z0 = cz * CHUNK_SIZE; // world position of the chunk's corner
+
+      // Fill each column: bedrock floor, stone, three layers of dirt, grass on top
+      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+          const height = terrainHeight(x0 + lx, z0 + lz);
+          for (let y = 0; y <= height; y++) {
+            let type = BLOCK.STONE;
+            if (y === 0) type = BLOCK.BEDROCK;
+            else if (y === height) type = BLOCK.GRASS;
+            else if (y >= height - 3) type = BLOCK.DIRT;
+            blocks[blockIndex(lx, y, lz)] = type;
+          }
+        }
+      }
+
+      // A chunk covers 2 × 2 tree cells
+      for (let gx = x0; gx < x0 + CHUNK_SIZE; gx += TREE_CELL) {
+        for (let gz = z0; gz < z0 + CHUNK_SIZE; gz += TREE_CELL) growTree(blocks, x0, z0, gx, gz);
+      }
+
+      const chunk = { cx, cz, blocks, mesh: null, edited: false };
+      chunks.set(chunkKey(cx, cz), chunk);
+      return chunk;
+    }
+
+    // Maybe grow a simple oak (a wooden trunk topped with a rounded blob of leaves) in the tree cell
+    // whose corner is (gx, gz). A random generator seeded from the cell's position makes every choice,
+    // so a cell always grows the same tree. Trees stay 2 blocks inside their cell, so the leaves never
+    // reach into another cell (or another chunk).
+    function growTree(blocks, x0, z0, gx, gz) {
+      const random = createRandom(SEED ^ Math.imul(gx, 73856093) ^ Math.imul(gz, 19349663));
+      const forest = Math.max(0, noise(gx / 48 - 500, gz / 48 - 500)); // some regions are forest, others open
+      if (random() > 0.1 + 0.6 * forest) return;
+
+      const x = gx + 2 + Math.floor(random() * (TREE_CELL - 4));
+      const z = gz + 2 + Math.floor(random() * (TREE_CELL - 4));
+      if (Math.hypot(x, z) < 5) return; // leave the spawn point clear
+      const ground = terrainHeight(x, z);
+      const top = ground + 4 + Math.floor(random() * 3); // y of the highest trunk block
+
+      for (let dy = -2; dy <= 1; dy++) {
+        const radius = dy < 0 ? 2 : 1; // two wide layers of leaves, then two narrow ones
+        for (let dx = -radius; dx <= radius; dx++) {
+          for (let dz = -radius; dz <= radius; dz++) {
+            // Randomly trim the corners (always on the very top layer) so the canopy looks round
+            const corner = Math.abs(dx) === radius && Math.abs(dz) === radius;
+            if (corner && (dy === 1 || random() < 0.5)) continue;
+            const i = blockIndex(x + dx - x0, top + dy, z + dz - z0);
+            if (blocks[i] === BLOCK.AIR) blocks[i] = BLOCK.LEAVES;
+          }
+        }
+      }
+      for (let y = ground + 1; y <= top; y++) blocks[blockIndex(x - x0, y, z - z0)] = BLOCK.WOOD;
+    }
+
+    // =========================================================================
+    //  SCENE: renderer, camera, lights, fog
+    // =========================================================================
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.prepend(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color();        // the sky colour: set every frame by the day/night cycle
+    // Fog thickens with distance and hides the edge of the generated area. Its colour always matches the sky.
+    const FOG_END = RENDER_DISTANCE * CHUNK_SIZE - 10;
+    scene.fog = new THREE.Fog(0xffffff, FOG_END * 0.35, FOG_END);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 300);
+    camera.rotation.order = 'YXZ'; // turn left/right first, then look up/down (standard first-person camera)
+
+    // Ambient light brightens every face equally; the sun and moon (directional lights) brighten faces
+    // depending on which way they point, so each side of a block gets its own shade.
+    // The day/night cycle moves them and changes their brightness and colour over time.
+    const ambientLight = new THREE.AmbientLight();
+    const sunLight = new THREE.DirectionalLight();
+    const moonLight = new THREE.DirectionalLight(0x9db4ff);
+    scene.add(ambientLight, sunLight, moonLight);
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Turn the painted canvas into a texture that keeps its crisp pixels up close
+    const atlasCanvas = createAtlasCanvas();
+    const atlasTexture = new THREE.CanvasTexture(atlasCanvas);
+    atlasTexture.colorSpace = THREE.SRGBColorSpace;
+    atlasTexture.magFilter = THREE.NearestFilter;               // blocky pixels up close
+    atlasTexture.minFilter = THREE.NearestMipmapLinearFilter;   // mipmaps stop far-away blocks from shimmering
+    atlasTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+    const blockMaterial = new THREE.MeshLambertMaterial({ map: atlasTexture });
+
+    // =========================================================================
+    //  DAY / NIGHT CYCLE
+    // =========================================================================
+
+    let timeOfDay = START_TIME; // 0 … 1, wrapping around: 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
+
+    // Sky colour for a given height of the sun (-1 … 1). Heights between two entries blend their colours.
+    const SKY_GRADIENT = [
+      [-0.35, new THREE.Color(0x0b1330)], // night
+      [-0.15, new THREE.Color(0x3a3470)], // twilight
+      [0,     new THREE.Color(0xf0a36c)], // sunrise / sunset
+      [0.3,   new THREE.Color(0x8ec9f0)], // day
+    ];
+    const NIGHT_AMBIENT = new THREE.Color(0x8193c9); // cool, moonlit blue
+    const SUNSET_LIGHT = new THREE.Color(0xffb27a);  // warm light while the sun is low
+    const WHITE = new THREE.Color(0xffffff);
+    const SKY_DISTANCE = 200;                        // how far from the camera the sun and moon are drawn
+    const sunDirection = new THREE.Vector3();        // unit vector pointing from the world towards the sun
+
+    // Paint a small pixel-art texture; colorAt(x, y) returns [r, g, b, alpha]
+    function createPixelTexture(size, colorAt) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const image = ctx.createImageData(size, size);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) image.data.set(colorAt(x, y), (y * size + x) * 4);
+      }
+      ctx.putImageData(image, 0, 0);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.magFilter = THREE.NearestFilter;
+      return texture;
+    }
+
+    // A flat square in the sky (the sun or the moon). Fog is turned off so it stays visible far away.
+    function createSkySquare(size, texture) {
+      return new THREE.Mesh(
+        new THREE.PlaneGeometry(size, size),
+        new THREE.MeshBasicMaterial({ map: texture, transparent: true, fog: false, depthWrite: false })
+      );
+    }
+
+    // Square sun: a white-hot core with a soft yellow glow around it
+    const sun = createSkySquare(26, createPixelTexture(16, (x, y) => {
+      const edge = Math.min(x, y, 15 - x, 15 - y); // 0 on the outer ring … 7 in the middle
+      if (edge < 2) return [255, 210, 110, 70];
+      if (edge < 4) return [255, 232, 150, 255];
+      return [255, 249, 214, 255];
+    }));
+
+    // Square moon: pale grey with a few craters and a faint halo
+    const CRATERS = new Set(['5,5', '6,5', '5,6', '10,7', '11,7', '10,8', '11,8', '7,11', '8,11', '8,10']);
+    const moon = createSkySquare(20, createPixelTexture(16, (x, y) => {
+      if (Math.min(x, y, 15 - x, 15 - y) < 2) return [190, 205, 255, 45];
+      return CRATERS.has(`${x},${y}`) ? [170, 176, 190, 255] : [226, 230, 240, 255];
+    }));
+
+    // Stars: random points on a big sphere around the camera that fade in at night
+    const stars = (() => {
+      const random = createRandom(99);
+      const positions = [];
+      for (let i = 0; i < 700; i++) {
+        // A random height plus a random angle around the vertical axis spreads stars evenly over the sphere
+        const y = random() * 2 - 1, angle = random() * Math.PI * 2, r = Math.sqrt(1 - y * y);
+        positions.push(Math.cos(angle) * r * 250, y * 250, Math.sin(angle) * r * 250);
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      return new THREE.Points(geometry, new THREE.PointsMaterial({
+        size: 2, sizeAttenuation: false, transparent: true, fog: false, depthWrite: false,
+      }));
+    })();
+    stars.renderOrder = -1; // draw the stars first, so the moon covers them instead of the other way round
+
+    scene.add(sun, moon, stars);
+
+    // Look up the sky colour for this sun height in SKY_GRADIENT and write it into `target`
+    function skyColorAt(height, target) {
+      const last = SKY_GRADIENT.length - 1;
+      if (height <= SKY_GRADIENT[0][0]) return target.copy(SKY_GRADIENT[0][1]);
+      if (height >= SKY_GRADIENT[last][0]) return target.copy(SKY_GRADIENT[last][1]);
+      let i = 1;
+      while (height > SKY_GRADIENT[i][0]) i++;
+      const [h0, color0] = SKY_GRADIENT[i - 1], [h1, color1] = SKY_GRADIENT[i];
+      return target.lerpColors(color0, color1, (height - h0) / (h1 - h0));
+    }
+
+    // Move the clock forward (only while playing). Holding T (or the on-screen button) fast-forwards time.
+    function advanceTime(dt) {
+      const speed = keys.has('KeyT') || touchInput.timeSkip ? TIME_SKIP_SPEED : 1;
+      timeOfDay = (timeOfDay + (dt * speed) / DAY_LENGTH) % 1;
+    }
+
+    // Set the sky colour, lights, sun, moon and stars for the current time of day
+    function updateSky() {
+      const { lerp, smoothstep } = THREE.MathUtils;
+
+      // The sun travels in a circle: it rises in the east (+x), is high at noon and sets in the west (-x).
+      // The z part tilts that circle a little, so the sun never passes straight overhead.
+      const angle = (timeOfDay - 0.25) * Math.PI * 2;
+      sunDirection.set(Math.cos(angle), Math.sin(angle), 0.35).normalize();
+      const height = sunDirection.y;                        // how high the sun is: -1 … 1
+      const daylight = smoothstep(height, -0.2, 0.25);      // 0 at night, 1 during the day
+      const dusk = Math.max(0, 1 - Math.abs(height) / 0.3); // 1 while the sun is on the horizon
+
+      // The fog uses the sky's colour, so the distance always fades smoothly into the sky
+      skyColorAt(height, scene.background);
+      scene.fog.color.copy(scene.background);
+
+      // A directional light shines from its position towards (0, 0, 0), so only the direction matters.
+      // The sun and moon only light the world while they're above the horizon.
+      sunLight.position.copy(sunDirection);
+      sunLight.intensity = 2 * smoothstep(height, -0.05, 0.2);
+      sunLight.color.copy(WHITE).lerp(SUNSET_LIGHT, dusk);
+      moonLight.position.copy(sunDirection).negate(); // the moon is always opposite the sun
+      moonLight.intensity = 0.5 * smoothstep(-height, -0.05, 0.2);
+      ambientLight.intensity = lerp(0.35, 1.2, daylight);
+      ambientLight.color.copy(NIGHT_AMBIENT).lerp(WHITE, daylight);
+
+      // The sun, moon and stars move with the camera, so they look infinitely far away
+      sun.position.copy(camera.position).addScaledVector(sunDirection, SKY_DISTANCE);
+      moon.position.copy(camera.position).addScaledVector(sunDirection, -SKY_DISTANCE);
+      sun.lookAt(camera.position);
+      moon.lookAt(camera.position);
+      sun.material.color.copy(WHITE).lerp(SUNSET_LIGHT, dusk); // the sun turns orange as it sets
+      sun.visible = height > -0.3;  // hide each one once it's well below the horizon, or it could peek
+      moon.visible = height < 0.3;  // through gaps at the far edge of the generated terrain
+      stars.position.copy(camera.position);
+      stars.rotation.z = angle;                                // the stars turn with the sky
+      stars.material.opacity = smoothstep(-height, 0, 0.25);   // they come out once the sun has set
+      stars.visible = stars.material.opacity > 0;
+
+      // The block outline is black by day and light at night, so it always stands out
+      highlight.material.color.setScalar(1 - daylight);
+    }
+
+    // =========================================================================
+    //  MESHING: turn block data into triangles, one mesh per chunk
+    // =========================================================================
+
+    // The 6 faces of a cube: the direction each one points, and its 4 corners as
+    // [x, y, z, u, v] (corner position inside the block + texture coordinate).
+    const FACES = [
+      { dir: [-1, 0, 0], corners: [[0, 1, 0, 0, 1], [0, 0, 0, 0, 0], [0, 1, 1, 1, 1], [0, 0, 1, 1, 0]] }, // -x
+      { dir: [ 1, 0, 0], corners: [[1, 1, 1, 0, 1], [1, 0, 1, 0, 0], [1, 1, 0, 1, 1], [1, 0, 0, 1, 0]] }, // +x
+      { dir: [ 0,-1, 0], corners: [[1, 0, 1, 1, 0], [0, 0, 1, 0, 0], [1, 0, 0, 1, 1], [0, 0, 0, 0, 1]] }, // -y (bottom)
+      { dir: [ 0, 1, 0], corners: [[0, 1, 1, 1, 1], [1, 1, 1, 0, 1], [0, 1, 0, 1, 0], [1, 1, 0, 0, 0]] }, // +y (top)
+      { dir: [ 0, 0,-1], corners: [[1, 0, 0, 0, 0], [0, 0, 0, 1, 0], [1, 1, 0, 0, 1], [0, 1, 0, 1, 1]] }, // -z
+      { dir: [ 0, 0, 1], corners: [[0, 0, 1, 0, 0], [1, 0, 1, 1, 0], [0, 1, 1, 0, 1], [1, 1, 1, 1, 1]] }, // +z
+    ];
+    const UV_INSET = 0.001; // pull texture coordinates in slightly so a tile never samples its neighbour
+
+    const dirtyChunks = new Set(); // keys of chunks whose mesh must be rebuilt because a block changed
+
+    // A block changed: rebuild its chunk, plus the neighbouring chunk if the block sits on a border
+    // (the neighbour may now need to show, or hide, the face touching this block)
+    function markChunksDirty(x, z) {
+      const cx = Math.floor(x / CHUNK_SIZE), cz = Math.floor(z / CHUNK_SIZE);
+      const lx = x - cx * CHUNK_SIZE, lz = z - cz * CHUNK_SIZE;
+      dirtyChunks.add(chunkKey(cx, cz));
+      if (lx === 0) dirtyChunks.add(chunkKey(cx - 1, cz));
+      if (lx === CHUNK_SIZE - 1) dirtyChunks.add(chunkKey(cx + 1, cz));
+      if (lz === 0) dirtyChunks.add(chunkKey(cx, cz - 1));
+      if (lz === CHUNK_SIZE - 1) dirtyChunks.add(chunkKey(cx, cz + 1));
+    }
+
+    // Build the triangles for one chunk. Vertex positions are relative to the chunk's corner (the mesh
+    // itself is moved into place), which keeps them precise however far from the start you walk.
+    function buildChunkGeometry(chunk) {
+      const positions = [], normals = [], uvs = [], indices = [];
+      // The blocks just across each border live in the neighbouring chunks
+      const west = getChunk(chunk.cx - 1, chunk.cz), east = getChunk(chunk.cx + 1, chunk.cz);
+      const north = getChunk(chunk.cx, chunk.cz - 1), south = getChunk(chunk.cx, chunk.cz + 1);
+
+      // Block at a position relative to this chunk, where lx or lz may be one step across a border
+      function blockAt(lx, y, lz) {
+        if (y >= WORLD_HEIGHT) return BLOCK.AIR;
+        let owner = chunk;
+        if (lx < 0) { owner = west; lx += CHUNK_SIZE; }
+        else if (lx >= CHUNK_SIZE) { owner = east; lx -= CHUNK_SIZE; }
+        else if (lz < 0) { owner = north; lz += CHUNK_SIZE; }
+        else if (lz >= CHUNK_SIZE) { owner = south; lz -= CHUNK_SIZE; }
+        return owner ? owner.blocks[blockIndex(lx, y, lz)] : BLOCK.AIR;
+      }
+
+      for (let y = 0; y < WORLD_HEIGHT; y++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+          for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+            const type = chunk.blocks[blockIndex(lx, y, lz)];
+            if (type === BLOCK.AIR) continue;
+            const info = BLOCK_INFO[type];
+
+            for (const { dir: [dx, dy, dz], corners } of FACES) {
+              // Only draw faces that touch air; faces pressed against another block can never be seen.
+              // (The underside of the world is skipped too; nobody can get below it.)
+              if (y + dy < 0 || blockAt(lx + dx, y + dy, lz + dz) !== BLOCK.AIR) continue;
+
+              const tile = dy > 0 ? info.top : dy < 0 ? info.bottom : info.side;
+              const first = positions.length / 3;
+              for (const [px, py, pz, u, v] of corners) {
+                positions.push(lx + px, y + py, lz + pz);
+                normals.push(dx, dy, dz);
+                uvs.push((tile + UV_INSET + u * (1 - 2 * UV_INSET)) / TILE_COUNT, UV_INSET + v * (1 - 2 * UV_INSET));
+              }
+              indices.push(first, first + 1, first + 2, first + 2, first + 1, first + 3); // two triangles
+            }
+          }
+        }
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+      geometry.setIndex(indices);
+      return geometry;
+    }
+
+    // Give a chunk a mesh, or refresh the one it has
+    function buildChunkMesh(chunk) {
+      const geometry = buildChunkGeometry(chunk);
+      if (chunk.mesh) {
+        chunk.mesh.geometry.dispose(); // free the old mesh's GPU memory
+        chunk.mesh.geometry = geometry;
+      } else {
+        chunk.mesh = new THREE.Mesh(geometry, blockMaterial);
+        chunk.mesh.position.set(chunk.cx * CHUNK_SIZE, 0, chunk.cz * CHUNK_SIZE);
+        scene.add(chunk.mesh);
+      }
+    }
+
+    // =========================================================================
+    //  CHUNK LOADING: keep the area around the player generated and drawn
+    // =========================================================================
+
+    let nearbyChunks = []; // { cx, cz, distance } for every chunk within RENDER_DISTANCE, nearest first
+    let centerKey = null;  // the chunk the player was standing in when nearbyChunks was worked out
+
+    function ensureChunk(cx, cz) {
+      return getChunk(cx, cz) ?? generateChunk(cx, cz);
+    }
+
+    // Runs every frame, building at most maxNewMeshes new chunk meshes (all of them at startup)
+    function updateChunks(maxNewMeshes) {
+      const pcx = Math.floor(player.position.x / CHUNK_SIZE), pcz = Math.floor(player.position.z / CHUNK_SIZE);
+
+      // Generating a chunk's blocks is quick, so the chunks right around the player are always made
+      // straight away: the player can never walk (or fall) into a part of the world that doesn't exist
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) ensureChunk(pcx + dx, pcz + dz);
+      }
+
+      // Entered a new chunk? Work out which chunks should now be visible, and drop the far-away ones
+      const key = chunkKey(pcx, pcz);
+      if (key !== centerKey) {
+        centerKey = key;
+        nearbyChunks = [];
+        for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
+          for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
+            const distance = Math.hypot(dx, dz);
+            if (distance <= RENDER_DISTANCE) nearbyChunks.push({ cx: pcx + dx, cz: pcz + dz, distance });
+          }
+        }
+        nearbyChunks.sort((a, b) => a.distance - b.distance);
+        unloadFarChunks(pcx, pcz);
+      }
+
+      // Rebuild meshes whose blocks were just edited (straight away, so edits feel instant)
+      for (const key of dirtyChunks) {
+        const chunk = chunks.get(key);
+        if (chunk?.mesh) buildChunkMesh(chunk);
+      }
+      dirtyChunks.clear();
+
+      // Give meshes to nearby chunks that don't have one yet: nearest first, a few per frame
+      let built = 0;
+      for (const { cx, cz } of nearbyChunks) {
+        if (built >= maxNewMeshes) break;
+        const chunk = ensureChunk(cx, cz);
+        if (chunk.mesh) continue;
+        // The mesh needs the neighbours' blocks too, to know which faces along the borders are hidden
+        ensureChunk(cx - 1, cz); ensureChunk(cx + 1, cz); ensureChunk(cx, cz - 1); ensureChunk(cx, cz + 1);
+        buildChunkMesh(chunk);
+        built++;
+      }
+    }
+
+    // Free the chunks far from the player. Unedited ones are simply generated again if the player comes
+    // back; edited ones keep their blocks (just not their mesh), so nothing you built is ever lost.
+    function unloadFarChunks(pcx, pcz) {
+      for (const [key, chunk] of chunks) {
+        if (Math.hypot(chunk.cx - pcx, chunk.cz - pcz) <= RENDER_DISTANCE + 2) continue;
+        if (chunk.mesh) {
+          scene.remove(chunk.mesh);
+          chunk.mesh.geometry.dispose();
+          chunk.mesh = null;
+        }
+        if (!chunk.edited) chunks.delete(key);
+      }
+    }
+
+    // =========================================================================
+    //  PLAYER: movement, gravity and collision
+    // =========================================================================
+
+    const player = {
+      position: new THREE.Vector3(), // the player's feet (bottom centre of their box)
+      velocity: new THREE.Vector3(),
+      yaw: 0,                        // looking left / right
+      pitch: 0,                      // looking up / down
+      onGround: false,
+    };
+
+    const HALF_WIDTH = PLAYER_WIDTH / 2;
+    const SKIN = 1e-4; // keep a hair's gap from walls so floating-point rounding never snags us
+    let stepProgress = 0; // distance walked since the last footstep sound
+
+    // Start on the grass at (0, 0); trees never grow right next to it
+    function spawnPlayer() {
+      player.position.set(0.5, terrainHeight(0, 0) + 1, 0.5);
+      player.velocity.set(0, 0, 0);
+    }
+
+    // Solid for physics? Below the world counts as solid (a floor you can't fall through), and so does
+    // any chunk that hasn't been generated yet (though the ones around the player always have been).
+    function isSolid(x, y, z) {
+      if (y < 0) return true;
+      if (!getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(z / CHUNK_SIZE))) return true;
+      return getBlock(x, y, z) !== BLOCK.AIR;
+    }
+
+    // Would the player's box, with its feet at (px, py, pz), overlap any solid block?
+    function collidesAt(px, py, pz) {
+      for (let y = Math.floor(py); y <= Math.floor(py + PLAYER_HEIGHT); y++) {
+        for (let z = Math.floor(pz - HALF_WIDTH); z <= Math.floor(pz + HALF_WIDTH); z++) {
+          for (let x = Math.floor(px - HALF_WIDTH); x <= Math.floor(px + HALF_WIDTH); x++) {
+            if (isSolid(x, y, z)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // Move the player along one axis ('x', 'y' or 'z'). If that runs into a block,
+    // snap flush against the block's face and return true.
+    function moveAxis(axis, amount) {
+      if (amount === 0) return false;
+      const pos = player.position;
+      pos[axis] += amount;
+      if (!collidesAt(pos.x, pos.y, pos.z)) return false;
+
+      if (axis === 'y') {
+        pos.y = amount < 0
+          ? Math.floor(pos.y) + 1 + SKIN                             // landed on top of a block
+          : Math.floor(pos.y + PLAYER_HEIGHT) - PLAYER_HEIGHT - SKIN; // bumped our head
+      } else {
+        pos[axis] = amount < 0
+          ? Math.floor(pos[axis] - HALF_WIDTH) + 1 + HALF_WIDTH + SKIN
+          : Math.floor(pos[axis] + HALF_WIDTH) - HALF_WIDTH - SKIN;
+      }
+      return true;
+    }
+
+    function updatePlayer(dt) {
+      // Which way does the player want to go, relative to where they're looking? Keys give full steps;
+      // the on-screen stick gives anything in between, so you can also creep along slowly.
+      const forward = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + touchInput.forward;
+      const strafe = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + touchInput.strafe;
+      const length = Math.max(1, Math.hypot(forward, strafe)); // never faster than walking, even diagonally
+      const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
+      const wishX = ((strafe * cos - forward * sin) / length) * WALK_SPEED;
+      const wishZ = ((-strafe * sin - forward * cos) / length) * WALK_SPEED;
+
+      // Ease towards that velocity: snappy on the ground, less control in the air
+      const grip = Math.min(1, (player.onGround ? 15 : 3) * dt);
+      player.velocity.x += (wishX - player.velocity.x) * grip;
+      player.velocity.z += (wishZ - player.velocity.z) * grip;
+
+      // Jumping and gravity
+      if (player.onGround && (keys.has('Space') || touchInput.jump)) {
+        player.velocity.y = JUMP_SPEED;
+        playFootstep(); // pushing off the ground makes a step sound
+      }
+      player.velocity.y = Math.max(player.velocity.y - GRAVITY * dt, -MAX_FALL_SPEED);
+
+      // Move one axis at a time, in steps of at most a quarter block, so nothing can tunnel through a block
+      const wasOnGround = player.onGround, fallSpeed = -player.velocity.y;
+      const startX = player.position.x, startZ = player.position.z;
+      const mx = player.velocity.x * dt, my = player.velocity.y * dt, mz = player.velocity.z * dt;
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(mx), Math.abs(my), Math.abs(mz)) / 0.25));
+      player.onGround = false;
+      for (let i = 0; i < steps; i++) {
+        if (moveAxis('x', mx / steps)) player.velocity.x = 0;
+        if (moveAxis('z', mz / steps)) player.velocity.z = 0;
+        if (moveAxis('y', my / steps)) {
+          if (my < 0) player.onGround = true;
+          player.velocity.y = 0;
+        }
+      }
+
+      // Sounds: a thump on landing, and a footstep every STEP_LENGTH blocks actually walked on the
+      // ground (so pushing against a wall stays quiet)
+      if (player.onGround && !wasOnGround) playLanding(fallSpeed);
+      if (player.onGround) {
+        stepProgress += Math.hypot(player.position.x - startX, player.position.z - startZ);
+        if (stepProgress >= STEP_LENGTH) {
+          stepProgress = 0;
+          playFootstep();
+        }
+      }
+    }
+
+    // The block the player is standing on. Checks under each corner of the player too, because you
+    // can stand on the very edge of a block with your middle over thin air.
+    function blockUnderPlayer() {
+      const { x, y, z } = player.position;
+      const below = Math.floor(y - 0.01);
+      for (const [dx, dz] of [[0, 0], [-HALF_WIDTH, -HALF_WIDTH], [HALF_WIDTH, -HALF_WIDTH], [-HALF_WIDTH, HALF_WIDTH], [HALF_WIDTH, HALF_WIDTH]]) {
+        const type = getBlock(Math.floor(x + dx), below, Math.floor(z + dz));
+        if (type !== BLOCK.AIR) return type;
+      }
+      return BLOCK.AIR;
+    }
+
+    // =========================================================================
+    //  AIMING, BREAKING & PLACING
+    // =========================================================================
+
+    let target = null; // the block under the crosshair: { x, y, z, normal }, or null
+    const rayDirection = new THREE.Vector3();
+
+    // Outline drawn around the targeted block (slightly bigger than a block, so it isn't hidden by its faces)
+    const highlight = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
+      new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6 })
+    );
+    highlight.visible = false;
+    scene.add(highlight);
+
+    // Walk through the grid one cell at a time along a ray (Amanatides & Woo's voxel traversal)
+    // and return the first solid block within maxDistance, plus the normal of the face the ray entered.
+    function raycastBlock(origin, dir, maxDistance) {
+      let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
+      const stepX = Math.sign(dir.x), stepY = Math.sign(dir.y), stepZ = Math.sign(dir.z);
+      // Distance along the ray needed to cross one whole cell on each axis
+      const deltaX = Math.abs(1 / dir.x), deltaY = Math.abs(1 / dir.y), deltaZ = Math.abs(1 / dir.z);
+      // Distance along the ray to the first cell boundary on each axis
+      const firstBoundary = (step, start, cell, delta) =>
+        step > 0 ? (cell + 1 - start) * delta : step < 0 ? (start - cell) * delta : Infinity;
+      let nextX = firstBoundary(stepX, origin.x, x, deltaX);
+      let nextY = firstBoundary(stepY, origin.y, y, deltaY);
+      let nextZ = firstBoundary(stepZ, origin.z, z, deltaZ);
+
+      const normal = { x: 0, y: 0, z: 0 };
+      let distance = 0;
+      while (distance <= maxDistance) {
+        if (getBlock(x, y, z) !== BLOCK.AIR) return { x, y, z, normal };
+        // Step into whichever neighbouring cell the ray reaches first
+        if (nextX < nextY && nextX < nextZ) {
+          x += stepX; distance = nextX; nextX += deltaX;
+          normal.x = -stepX; normal.y = 0; normal.z = 0;
+        } else if (nextY < nextZ) {
+          y += stepY; distance = nextY; nextY += deltaY;
+          normal.x = 0; normal.y = -stepY; normal.z = 0;
+        } else {
+          z += stepZ; distance = nextZ; nextZ += deltaZ;
+          normal.x = 0; normal.y = 0; normal.z = -stepZ;
+        }
+      }
+      return null;
+    }
+
+    function updateTarget() {
+      target = raycastBlock(camera.position, camera.getWorldDirection(rayDirection), REACH);
+      highlight.visible = target !== null;
+      if (target) highlight.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5);
+    }
+
+    function breakBlock() {
+      updateTarget();
+      if (!target) return;
+      const type = getBlock(target.x, target.y, target.z);
+      if (type === BLOCK.BEDROCK) { // the world's floor is unbreakable: just a dull knock
+        playBlockSound(type, 'hit');
+        return;
+      }
+      setBlock(target.x, target.y, target.z, BLOCK.AIR);
+      playBlockSound(type, 'break');
+    }
+
+    function placeBlock() {
+      updateTarget();
+      if (!target) return;
+      // The new block goes in the empty cell next to the face we're aiming at
+      const x = target.x + target.normal.x, y = target.y + target.normal.y, z = target.z + target.normal.z;
+      if (y < 0 || y >= WORLD_HEIGHT || getBlock(x, y, z) !== BLOCK.AIR) return;
+      if (overlapsPlayer(x, y, z)) return; // never place a block inside yourself
+      setBlock(x, y, z, HOTBAR[selectedSlot]);
+      playBlockSound(HOTBAR[selectedSlot], 'place');
+    }
+
+    // Would a block at (x, y, z) intersect the player's box?
+    function overlapsPlayer(x, y, z) {
+      const p = player.position;
+      return x < p.x + HALF_WIDTH && x + 1 > p.x - HALF_WIDTH &&
+             y < p.y + PLAYER_HEIGHT && y + 1 > p.y &&
+             z < p.z + HALF_WIDTH && z + 1 > p.z - HALF_WIDTH;
+    }
+
+    // =========================================================================
+    //  HUD: hotbar and messages
+    // =========================================================================
+
+    const hotbarEl = document.getElementById('hotbar');
+    const messageEl = document.getElementById('message');
+    let selectedSlot = 0;
+    let messageTimer = 0;
+
+    function buildHotbar() {
+      HOTBAR.forEach((type, i) => {
+        const slot = document.createElement('div');
+        slot.className = i === selectedSlot ? 'slot selected' : 'slot';
+        const number = document.createElement('span');
+        number.textContent = i + 1;
+        slot.append(createBlockIcon(atlasCanvas, type), number);
+        slot.addEventListener('pointerdown', () => selectSlot(i)); // tapping a slot chooses it (touch screens)
+        hotbarEl.append(slot);
+      });
+      showChosenBlockOnPlaceButton();
+    }
+
+    function selectSlot(index) {
+      selectedSlot = (index + HOTBAR.length) % HOTBAR.length; // wrap around when scrolling
+      [...hotbarEl.children].forEach((slot, i) => slot.classList.toggle('selected', i === selectedSlot));
+      showChosenBlockOnPlaceButton();
+      showMessage(BLOCK_INFO[HOTBAR[selectedSlot]].name);
+      playClick();
+    }
+
+    // On touch screens the place button shows the block it will place
+    function showChosenBlockOnPlaceButton() {
+      document.getElementById('place-button').replaceChildren(createBlockIcon(atlasCanvas, HOTBAR[selectedSlot]));
+    }
+
+    // Briefly show a line of text above the hotbar
+    function showMessage(text) {
+      messageEl.textContent = text;
+      messageEl.classList.add('visible');
+      clearTimeout(messageTimer);
+      messageTimer = setTimeout(() => messageEl.classList.remove('visible'), 1500);
+    }
+
+    // =========================================================================
+    //  SOUND EFFECTS: every sound is synthesised on the spot with the Web Audio API
+    //  (shaped bursts of noise and short tones), so no audio files are needed
+    // =========================================================================
+
+    let audio = null;       // the AudioContext; browsers only allow sound after a click, so it's made then
+    let masterGain = null;  // every sound passes through this, so muting is a single switch
+    let noiseBuffer = null; // a second of random noise: the raw material for crunches, clicks and rustles
+    let muted = false;
+
+    // Called by the start screen's click handler
+    function initAudio() {
+      if (audio) {
+        audio.resume(); // in case the browser suspended sound while the game was paused
+        return;
+      }
+      audio = new AudioContext();
+      masterGain = audio.createGain();
+      masterGain.gain.value = muted ? 0 : MASTER_VOLUME;
+      masterGain.connect(audio.destination);
+      noiseBuffer = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+      const samples = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
+    }
+
+    // A volume curve that rises quickly and then fades away: the shape of a short sound
+    function envelope(volume, attack, duration, start) {
+      const gain = audio.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(volume, start + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      gain.connect(masterGain);
+      return gain;
+    }
+
+    // Filtered noise: a low filter gives a dull crunch, a high one a hiss or a rustle
+    function noiseBurst({ filter = 'bandpass', frequency, q = 1, volume, duration, attack = 0.005, delay = 0 }) {
+      const start = audio.currentTime + delay;
+      const source = audio.createBufferSource();
+      source.buffer = noiseBuffer;
+      const shaper = audio.createBiquadFilter();
+      shaper.type = filter;
+      shaper.frequency.value = frequency;
+      shaper.Q.value = q;
+      source.connect(shaper).connect(envelope(volume, attack, duration, start));
+      source.start(start, Math.random() * 0.5); // start somewhere random in the noise, so repeats differ
+      source.stop(start + duration);
+    }
+
+    // A tone that slides from one pitch to another: knocks, thuds and clicks
+    function tone({ type = 'sine', from, to = from, volume, duration, delay = 0 }) {
+      const start = audio.currentTime + delay;
+      const oscillator = audio.createOscillator();
+      oscillator.type = type;
+      oscillator.frequency.setValueAtTime(from, start);
+      oscillator.frequency.exponentialRampToValueAtTime(to, start + duration);
+      oscillator.connect(envelope(volume, 0.003, duration, start));
+      oscillator.start(start);
+      oscillator.stop(start + duration);
+    }
+
+    // The basic sound of each material. volume, pitch and length scale it for the different actions
+    // (breaking is loud and full, footsteps soft and short); delay starts it a little later.
+    const MATERIAL_SOUNDS = {
+      grass: (volume, pitch, length, delay) =>
+        noiseBurst({ frequency: 2200 * pitch, q: 0.6, volume: 0.5 * volume, duration: 0.16 * length, delay }),
+      dirt: (volume, pitch, length, delay) =>
+        noiseBurst({ filter: 'lowpass', frequency: 1300 * pitch, volume: 0.7 * volume, duration: 0.13 * length, delay }),
+      stone: (volume, pitch, length, delay) => {
+        noiseBurst({ frequency: 3200 * pitch, q: 1.5, volume: 0.45 * volume, duration: 0.09 * length, delay });
+        tone({ type: 'triangle', from: 900 * pitch, to: 500 * pitch, volume: 0.15 * volume, duration: 0.05 * length, delay });
+      },
+      wood: (volume, pitch, length, delay) => {
+        tone({ type: 'triangle', from: 260 * pitch, to: 150 * pitch, volume: 0.5 * volume, duration: 0.1 * length, delay });
+        noiseBurst({ frequency: 1000 * pitch, q: 1.2, volume: 0.2 * volume, duration: 0.06 * length, delay });
+      },
+      leaves: (volume, pitch, length, delay) =>
+        noiseBurst({ filter: 'highpass', frequency: 3500 * pitch, volume: 0.25 * volume, duration: 0.22 * length, attack: 0.03, delay }),
+    };
+
+    // How each action changes a material's basic sound
+    const SOUND_ACTIONS = {
+      break: { volume: 1,    pitch: 1,    length: 1 },
+      place: { volume: 0.8,  pitch: 0.8,  length: 0.7 },
+      hit:   { volume: 0.6,  pitch: 0.7,  length: 0.5 }, // hitting a block that won't break (bedrock)
+      step:  { volume: 0.35, pitch: 1.1,  length: 0.6 },
+      land:  { volume: 0.45, pitch: 0.85, length: 0.8 },
+    };
+
+    // Play the sound of a block being broken, placed, hit, stepped on or landed on.
+    // strength makes it louder or softer (landing from a big fall is louder).
+    function playBlockSound(type, action, strength = 1) {
+      if (!audio || muted) return;
+      const play = MATERIAL_SOUNDS[BLOCK_INFO[type].sound];
+      const { volume, pitch, length } = SOUND_ACTIONS[action];
+      const vary = 0.9 + Math.random() * 0.2; // a slightly different pitch each time, so repeats don't sound robotic
+      play(volume * strength, pitch * vary, length, 0);
+      if (action === 'break') play(0.5, 0.7 * vary, 0.8, 0.05); // bits crumbling just after
+      if (action === 'place' || action === 'land') {
+        tone({ from: 150, to: 60, volume: 0.35 * volume * strength, duration: 0.08 }); // a soft, heavy thud
+      }
+    }
+
+    function playFootstep() {
+      const type = blockUnderPlayer();
+      if (type !== BLOCK.AIR) playBlockSound(type, 'step');
+    }
+
+    // Louder the faster you were falling; tiny drops make no sound
+    function playLanding(fallSpeed) {
+      const type = blockUnderPlayer();
+      if (type !== BLOCK.AIR && fallSpeed > 3) playBlockSound(type, 'land', Math.min(2, fallSpeed / 10));
+    }
+
+    // A tiny click when choosing a block in the hotbar
+    function playClick() {
+      if (!audio || muted) return;
+      tone({ type: 'triangle', from: 1400, to: 1000, volume: 0.08, duration: 0.04 });
+    }
+
+    function toggleMute() {
+      muted = !muted;
+      if (masterGain) masterGain.gain.value = muted ? 0 : MASTER_VOLUME;
+      document.getElementById('mute-button').classList.toggle('muted', muted); // the touch screen's sound button
+      showMessage(muted ? 'Sound off' : 'Sound on');
+    }
+
+    // =========================================================================
+    //  INPUT: starting and pausing, keyboard and mouse
+    // =========================================================================
+
+    const overlay = document.getElementById('overlay');
+    const playButton = document.getElementById('play-button');
+    const lockHint = document.getElementById('lock-hint');
+    const keys = new Set(); // codes of the keys currently held down, e.g. 'KeyW'
+    let playing = false;    // true while the game is running (the start screen is hidden)
+    let started = false;    // false until the game first starts (after that the button says "resume")
+    let isLocked = false;   // on a computer: true while the mouse is captured
+    let lastWheelTime = 0;
+
+    // Start the game, or pause it and show the start screen
+    function setPlaying(on) {
+      playing = on;
+      overlay.classList.toggle('hidden', on);
+      if (on) {
+        started = true;
+        updatePlayButton();
+        lockHint.hidden = true;
+      } else {
+        keys.clear();      // otherwise a key held while pausing would stay "pressed"...
+        releaseTouches();  // ...and the same goes for fingers on the on-screen controls
+      }
+    }
+
+    function updatePlayButton() {
+      playButton.textContent = `${touchMode ? 'Tap' : 'Click'} to ${started ? 'resume' : 'play'}`;
+    }
+
+    // Whatever touches the start screen decides the controls: a finger (or pen) gets the on-screen
+    // controls, a mouse gets mouse-look. This listens in the capture phase, so it runs before the
+    // start screen's click handler below.
+    window.addEventListener('pointerdown', e => {
+      if (!playing) setTouchMode(e.pointerType !== 'mouse');
+    }, { capture: true });
+
+    function setTouchMode(on) {
+      touchMode = on;
+      document.body.classList.toggle('touch', on); // CSS shows the on-screen controls and the touch help
+      updatePlayButton();
+    }
+
+    // Clicking or tapping the start screen switches on sound and starts the game. On a computer that
+    // means capturing the mouse ('pointerlockchange' below then starts play). Newer browsers also
+    // return a promise that rejects when capture fails; the 'pointerlockerror' handler deals with that.
+    overlay.addEventListener('click', () => {
+      initAudio();
+      if (touchMode) {
+        document.documentElement.requestFullscreen?.()?.catch(() => {}); // more room to play, where allowed
+        setPlaying(true);
+      } else {
+        renderer.domElement.requestPointerLock()?.catch?.(() => {});
+      }
+    });
+
+    // Fires when the mouse is captured, or released (e.g. with Esc)
+    document.addEventListener('pointerlockchange', () => {
+      isLocked = document.pointerLockElement === renderer.domElement;
+      setPlaying(isLocked);
+    });
+
+    // The browser refused to capture the mouse. Chrome does this if you click within a second of
+    // pressing Esc, and some embedded previews never allow it, so explain what to do.
+    document.addEventListener('pointerlockerror', () => {
+      lockHint.hidden = false;
+    });
+
+    // Pause when the page is hidden (on a phone, switching to another app), so a finger lifted
+    // while away can't leave the player walking forever
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && touchMode) setPlaying(false);
+    });
+
+    // Turn the camera by how far the mouse (or a finger) moved
+    function look(dx, dy, sensitivity) {
+      player.yaw -= dx * sensitivity;
+      player.pitch -= dy * sensitivity;
+      const limit = Math.PI / 2 - 0.01; // can't look past straight up or straight down
+      player.pitch = Math.max(-limit, Math.min(limit, player.pitch));
+    }
+
+    document.addEventListener('mousemove', e => {
+      if (isLocked) look(e.movementX, e.movementY, MOUSE_SENSITIVITY);
+    });
+
+    document.addEventListener('mousedown', e => {
+      if (!isLocked) return;
+      if (e.button === 0) breakBlock();
+      if (e.button === 2) placeBlock();
+    });
+    document.addEventListener('contextmenu', e => e.preventDefault()); // right-click places blocks instead
+
+    document.addEventListener('keydown', e => {
+      if (!playing) return;
+      keys.add(e.code);
+      if (e.code === 'Space') e.preventDefault();
+      if (e.repeat) return; // holding a key down shouldn't keep re-choosing blocks or flipping the sound
+      if (e.code.startsWith('Digit')) {
+        const slot = Number(e.code.slice(5)) - 1; // 'Digit3' → slot 2
+        if (slot >= 0 && slot < HOTBAR.length) selectSlot(slot);
+      }
+      if (e.code === 'KeyM') toggleMute();
+    });
+    document.addEventListener('keyup', e => keys.delete(e.code));
+    window.addEventListener('blur', () => keys.clear());
+
+    // Mouse wheel cycles through the hotbar (throttled, since trackpads send a stream of tiny scrolls)
+    document.addEventListener('wheel', e => {
+      if (!isLocked || e.deltaY === 0 || e.timeStamp - lastWheelTime < 120) return;
+      lastWheelTime = e.timeStamp;
+      selectSlot(selectedSlot + Math.sign(e.deltaY));
+    });
+
+    // =========================================================================
+    //  TOUCH CONTROLS (phones and tablets): a thumb stick on the left, drag on
+    //  the right to look around, and buttons for everything else
+    // =========================================================================
+
+    const touchInput = { forward: 0, strafe: 0, jump: false, timeSkip: false }; // read by updatePlayer and advanceTime
+    const joystick = document.getElementById('joystick');
+    const joystickKnob = document.getElementById('joystick-knob');
+    let stickTouch = null; // { id, x, y }: the finger on the stick, and where it first landed
+    let lookTouch = null;  // { id, x, y }: the finger dragging the view, and where it was last seen
+
+    // A finger landing on the left half of the screen grabs the stick (which jumps to meet it);
+    // one landing on the right half looks around. Several fingers can be down at once.
+    renderer.domElement.addEventListener('pointerdown', e => {
+      if (!playing || !touchMode) return;
+      if (e.clientX < window.innerWidth / 2) {
+        if (stickTouch) return;
+        stickTouch = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        joystick.classList.add('active');
+        joystick.style.left = `${e.clientX}px`;
+        joystick.style.top = `${e.clientY}px`;
+      } else if (!lookTouch) {
+        lookTouch = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      }
+    });
+
+    window.addEventListener('pointermove', e => {
+      if (stickTouch?.id === e.pointerId) {
+        // How far the thumb has pushed the stick, up to the edge of its ring
+        let dx = e.clientX - stickTouch.x, dy = e.clientY - stickTouch.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance > JOYSTICK_RADIUS) {
+          dx *= JOYSTICK_RADIUS / distance;
+          dy *= JOYSTICK_RADIUS / distance;
+        }
+        joystickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+        touchInput.strafe = dx / JOYSTICK_RADIUS;
+        touchInput.forward = -dy / JOYSTICK_RADIUS; // pushing up walks forwards
+      } else if (lookTouch?.id === e.pointerId) {
+        look(e.clientX - lookTouch.x, e.clientY - lookTouch.y, TOUCH_LOOK_SENSITIVITY);
+        lookTouch.x = e.clientX;
+        lookTouch.y = e.clientY;
+      }
+    });
+
+    for (const type of ['pointerup', 'pointercancel']) {
+      window.addEventListener(type, e => {
+        if (stickTouch?.id === e.pointerId) releaseStick();
+        if (lookTouch?.id === e.pointerId) lookTouch = null;
+      });
+    }
+
+    // Jump and fast-forward work while held; the other buttons act the moment they're touched
+    holdButton('jump-button', held => { touchInput.jump = held; });
+    holdButton('time-button', held => { touchInput.timeSkip = held; });
+    tapButton('break-button', breakBlock);
+    tapButton('place-button', placeBlock);
+    tapButton('mute-button', toggleMute);
+    tapButton('pause-button', () => setPlaying(false));
+
+    // CSS switches off most of the browser's own touch gestures; this catches Safari's pinch zoom
+    document.addEventListener('gesturestart', e => e.preventDefault());
+
+    function holdButton(id, onChange) {
+      const button = document.getElementById(id);
+      let pointer = null; // the finger holding the button
+      button.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        pointer = e.pointerId;
+        button.classList.add('pressed');
+        onChange(true);
+      });
+      const release = e => {
+        if (e.pointerId !== pointer) return;
+        pointer = null;
+        button.classList.remove('pressed');
+        onChange(false);
+      };
+      window.addEventListener('pointerup', release);
+      window.addEventListener('pointercancel', release);
+    }
+
+    function tapButton(id, action) {
+      const button = document.getElementById(id);
+      button.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        button.classList.add('pressed');
+        action();
+      });
+      for (const type of ['pointerup', 'pointercancel', 'pointerleave']) {
+        button.addEventListener(type, () => button.classList.remove('pressed'));
+      }
+    }
+
+    function releaseStick() {
+      stickTouch = null;
+      touchInput.forward = touchInput.strafe = 0;
+      joystick.classList.remove('active');
+      joystick.style.left = joystick.style.top = ''; // back to its resting spot
+      joystickKnob.style.transform = '';
+    }
+
+    // Let go of everything (used when the game pauses)
+    function releaseTouches() {
+      releaseStick();
+      lookTouch = null;
+      touchInput.jump = touchInput.timeSkip = false;
+      for (const button of document.querySelectorAll('.touch-button.pressed')) button.classList.remove('pressed');
+    }
+
+    // =========================================================================
+    //  GAME LOOP
+    // =========================================================================
+
+    const clock = new THREE.Clock();
+
+    function frame() {
+      // Cap the time step so a slow frame (or returning to a background tab) can't cause a giant jump
+      const dt = Math.min(clock.getDelta(), 0.1);
+      updateChunks(CHUNKS_PER_FRAME);
+      if (playing) { // the world, including the clock, stays paused while the start screen is showing
+        updatePlayer(dt);
+        advanceTime(dt);
+      }
+
+      camera.position.set(player.position.x, player.position.y + EYE_HEIGHT, player.position.z);
+      camera.rotation.set(player.pitch, player.yaw, 0);
+
+      updateSky();
+      updateTarget();
+      renderer.render(scene, camera);
+    }
+
+    // =========================================================================
+    //  START
+    // =========================================================================
+
+    spawnPlayer();
+    updateChunks(Infinity); // build everything in view before the first frame
+    buildHotbar();
+    setTouchMode(touchMode); // show the right controls and button text for this device
+    renderer.setAnimationLoop(frame);
+
+    document.getElementById('seed').textContent = `World seed: ${SEED}`;
+    window.gameReady = true;
+  </script>
+</body>
+</html>
